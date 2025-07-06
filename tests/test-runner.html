@@ -89,6 +89,9 @@
     <script src="../modules/ocr-service.js"></script>
     <script src="../modules/screenshot-capture.js"></script>
     <script src="../modules/ui-manager.js"></script>
+    
+    <!-- Load content script modules -->
+    <script src="../content-modules/area-capture.js"></script>
 
     <script>
         // Simple test framework
@@ -229,6 +232,128 @@
                 return mock;
             }
 
+            // DOM Mocking utilities for content script testing
+            createMockElement(tagName, properties = {}) {
+                const element = {
+                    tagName: tagName.toUpperCase(),
+                    style: {},
+                    classList: {
+                        add: this.createMock(),
+                        remove: this.createMock(),
+                        contains: this.createMock(() => false),
+                        toggle: this.createMock()
+                    },
+                    addEventListener: this.createMock(),
+                    removeEventListener: this.createMock(),
+                    appendChild: this.createMock(),
+                    removeChild: this.createMock(),
+                    remove: this.createMock(),
+                    getBoundingClientRect: this.createMock(() => ({
+                        left: 0, top: 0, right: 100, bottom: 100, width: 100, height: 100
+                    })),
+                    setAttribute: this.createMock(),
+                    getAttribute: this.createMock(),
+                    focus: this.createMock(),
+                    blur: this.createMock(),
+                    ...properties
+                };
+                
+                // Mock canvas-specific methods if it's a canvas element
+                if (tagName.toLowerCase() === 'canvas') {
+                    element.getContext = this.createMock(() => this.createMockCanvasContext());
+                    element.toDataURL = this.createMock(() => 'data:image/png;base64,mockdata');
+                    element.width = 100;
+                    element.height = 100;
+                }
+                
+                return element;
+            }
+
+            createMockCanvasContext() {
+                return {
+                    drawImage: this.createMock(),
+                    clearRect: this.createMock(),
+                    fillRect: this.createMock(),
+                    strokeRect: this.createMock(),
+                    save: this.createMock(),
+                    restore: this.createMock(),
+                    translate: this.createMock(),
+                    scale: this.createMock(),
+                    fillStyle: '#000000',
+                    strokeStyle: '#000000',
+                    lineWidth: 1,
+                    canvas: { width: 100, height: 100 }
+                };
+            }
+
+            mockDocument() {
+                return {
+                    createElement: this.createMock((tagName) => this.createMockElement(tagName)),
+                    getElementById: this.createMock(() => null),
+                    querySelector: this.createMock(() => null),
+                    querySelectorAll: this.createMock(() => []),
+                    body: this.createMockElement('body'),
+                    documentElement: this.createMockElement('html'),
+                    addEventListener: this.createMock(),
+                    removeEventListener: this.createMock()
+                };
+            }
+
+            mockWindow() {
+                return {
+                    addEventListener: this.createMock(),
+                    removeEventListener: this.createMock(),
+                    getComputedStyle: this.createMock(() => ({})),
+                    innerWidth: 1920,
+                    innerHeight: 1080,
+                    pageXOffset: 0,
+                    pageYOffset: 0,
+                    Image: this.createMock(function() {
+                        const img = {
+                            onload: null,
+                            onerror: null,
+                            src: '',
+                            width: 100,
+                            height: 100,
+                            complete: false
+                        };
+                        // Simulate async image loading
+                        setTimeout(() => {
+                            img.complete = true;
+                            if (img.onload) img.onload();
+                        }, 0);
+                        return img;
+                    })
+                };
+            }
+
+            createMouseEvent(type, properties = {}) {
+                return {
+                    type,
+                    clientX: 0,
+                    clientY: 0,
+                    pageX: 0,
+                    pageY: 0,
+                    button: 0,
+                    buttons: 1,
+                    preventDefault: this.createMock(),
+                    stopPropagation: this.createMock(),
+                    ...properties
+                };
+            }
+
+            createKeyboardEvent(type, properties = {}) {
+                return {
+                    type,
+                    key: '',
+                    code: '',
+                    keyCode: 0,
+                    preventDefault: this.createMock(),
+                    stopPropagation: this.createMock(),
+                    ...properties
+                };
+            }
+
             printResults() {
                 this.log('\n📊 Test Results Summary:');
                 this.log(`Total tests: ${this.results.total}`);
@@ -254,6 +379,11 @@
         window.itAsync = (description, fn) => testFramework.itAsync(description, fn);
         window.expect = (actual) => testFramework.expect(actual);
         window.createMock = (impl) => testFramework.createMock(impl);
+        window.createMockElement = (tagName, props) => testFramework.createMockElement(tagName, props);
+        window.mockDocument = () => testFramework.mockDocument();
+        window.mockWindow = () => testFramework.mockWindow();
+        window.createMouseEvent = (type, props) => testFramework.createMouseEvent(type, props);
+        window.createKeyboardEvent = (type, props) => testFramework.createKeyboardEvent(type, props);
 
         // Test runner
         class TestRunner {
@@ -298,6 +428,7 @@
                         expect(typeof StorageManager).toBe('function');
                         expect(typeof UIManager).toBe('function');
                         expect(typeof ScreenshotCapture).toBe('function');
+                        expect(typeof AreaCapture).toBe('function');
                     });
 
                     it('should create module instances', () => {
@@ -306,12 +437,14 @@
                         const storage = new StorageManager();
                         const ui = new UIManager();
                         const screenshot = new ScreenshotCapture();
+                        const areaCapture = new AreaCapture(testFramework.mockDocument());
                         
                         expect(clipboard).toBeInstanceOf(ClipboardManager);
                         expect(ocr).toBeInstanceOf(OCRService);
                         expect(storage).toBeInstanceOf(StorageManager);
                         expect(ui).toBeInstanceOf(UIManager);
                         expect(screenshot).toBeInstanceOf(ScreenshotCapture);
+                        expect(areaCapture).toBeInstanceOf(AreaCapture);
                     });
                 });
             }
@@ -395,6 +528,264 @@
                         const capture = new ScreenshotCapture();
                         expect(capture.isCapturing).toBeFalsy();
                         expect(capture.currentCallback).toBeNull();
+                    });
+                });
+
+                // AreaCapture tests
+                describe('AreaCapture', () => {
+                    let areaCapture;
+                    let mockDocument;
+                    let originalDocument;
+
+                    // Setup before each test
+                    const beforeEach = () => {
+                        mockDocument = testFramework.mockDocument();
+                        originalDocument = document;
+                        
+                        // Pass mock document to AreaCapture constructor
+                        areaCapture = new AreaCapture(mockDocument);
+                    };
+
+                    // Cleanup after each test
+                    const afterEach = () => {
+                        if (areaCapture.isActive) {
+                            areaCapture.stop();
+                        }
+                    };
+
+                    it('should initialize with correct default state', () => {
+                        beforeEach();
+                        
+                        const state = areaCapture.getState();
+                        expect(state.isActive).toBeFalsy();
+                        expect(state.isDrawing).toBeFalsy();
+                        expect(state.hasOverlay).toBeFalsy();
+                        expect(state.hasSelectionBox).toBeFalsy();
+                        expect(state.coordinates.startX).toBe(0);
+                        expect(state.coordinates.startY).toBe(0);
+                        
+                        afterEach();
+                    });
+
+                    it('should start area capture successfully', () => {
+                        beforeEach();
+                        
+                        const onComplete = createMock();
+                        const onCancel = createMock();
+                        
+                        areaCapture.start(onComplete, onCancel);
+                        
+                        const state = areaCapture.getState();
+                        expect(state.isActive).toBeTruthy();
+                        expect(areaCapture.onCompleteCallback).toBe(onComplete);
+                        expect(areaCapture.onCancelCallback).toBe(onCancel);
+                        expect(mockDocument.createElement.callCount).toBe(3); // overlay, selection, instructions
+                        
+                        afterEach();
+                    });
+
+                    it('should throw error when starting while already active', () => {
+                        beforeEach();
+                        
+                        areaCapture.start(createMock(), createMock());
+                        
+                        expect(() => {
+                            areaCapture.start(createMock(), createMock());
+                        }).toThrow('Area capture is already active');
+                        
+                        afterEach();
+                    });
+
+                    it('should handle mouse down event correctly', () => {
+                        beforeEach();
+                        
+                        areaCapture.start(createMock(), createMock());
+                        
+                        const mouseEvent = createMouseEvent('mousedown', {
+                            clientX: 100,
+                            clientY: 200
+                        });
+                        
+                        areaCapture.handleMouseDown(mouseEvent);
+                        
+                        const state = areaCapture.getState();
+                        expect(state.isDrawing).toBeTruthy();
+                        expect(state.coordinates.startX).toBe(100);
+                        expect(state.coordinates.startY).toBe(200);
+                        expect(mouseEvent.preventDefault.callCount).toBe(1);
+                        
+                        afterEach();
+                    });
+
+                    it('should handle mouse move during drawing', () => {
+                        beforeEach();
+                        
+                        areaCapture.start(createMock(), createMock());
+                        areaCapture.isDrawing = true;
+                        areaCapture.startX = 50;
+                        areaCapture.startY = 75;
+                        
+                        const mouseEvent = createMouseEvent('mousemove', {
+                            clientX: 150,
+                            clientY: 175
+                        });
+                        
+                        areaCapture.handleMouseMove(mouseEvent);
+                        
+                        const state = areaCapture.getState();
+                        expect(state.coordinates.endX).toBe(150);
+                        expect(state.coordinates.endY).toBe(175);
+                        
+                        afterEach();
+                    });
+
+                    it('should calculate selected area correctly', () => {
+                        beforeEach();
+                        
+                        areaCapture.startX = 50;
+                        areaCapture.startY = 100;
+                        areaCapture.endX = 200;
+                        areaCapture.endY = 300;
+                        
+                        const area = areaCapture.getSelectedArea();
+                        
+                        expect(area.x).toBe(50);
+                        expect(area.y).toBe(100);
+                        expect(area.width).toBe(150);
+                        expect(area.height).toBe(200);
+                        
+                        afterEach();
+                    });
+
+                    it('should handle reverse selection (drag from bottom-right to top-left)', () => {
+                        beforeEach();
+                        
+                        areaCapture.startX = 200;
+                        areaCapture.startY = 300;
+                        areaCapture.endX = 50;
+                        areaCapture.endY = 100;
+                        
+                        const area = areaCapture.getSelectedArea();
+                        
+                        expect(area.x).toBe(50);
+                        expect(area.y).toBe(100);
+                        expect(area.width).toBe(150);
+                        expect(area.height).toBe(200);
+                        
+                        afterEach();
+                    });
+
+                    it('should reject small selections', () => {
+                        beforeEach();
+                        
+                        const onComplete = createMock();
+                        areaCapture.start(onComplete, createMock());
+                        areaCapture.isDrawing = true;
+                        areaCapture.startX = 100;
+                        areaCapture.startY = 100;
+                        areaCapture.endX = 105; // Only 5px wide
+                        areaCapture.endY = 105; // Only 5px tall
+                        
+                        const mouseEvent = createMouseEvent('mouseup');
+                        areaCapture.handleMouseUp(mouseEvent);
+                        
+                        expect(onComplete.callCount).toBe(0); // Should not complete
+                        expect(areaCapture.isDrawing).toBeFalsy();
+                        
+                        afterEach();
+                    });
+
+                    it('should complete selection for valid area', () => {
+                        beforeEach();
+                        
+                        const onComplete = createMock();
+                        areaCapture.start(onComplete, createMock());
+                        areaCapture.isDrawing = true;
+                        areaCapture.startX = 100;
+                        areaCapture.startY = 100;
+                        areaCapture.endX = 200;
+                        areaCapture.endY = 200;
+                        
+                        const mouseEvent = createMouseEvent('mouseup');
+                        areaCapture.handleMouseUp(mouseEvent);
+                        
+                        expect(onComplete.callCount).toBe(1);
+                        const area = onComplete.calls[0][0];
+                        expect(area.width).toBe(100);
+                        expect(area.height).toBe(100);
+                        
+                        afterEach();
+                    });
+
+                    it('should handle ESC key cancellation', () => {
+                        beforeEach();
+                        
+                        const onCancel = createMock();
+                        areaCapture.start(createMock(), onCancel);
+                        
+                        const keyEvent = createKeyboardEvent('keydown', { key: 'Escape' });
+                        areaCapture.handleKeyDown(keyEvent);
+                        
+                        expect(onCancel.callCount).toBe(1);
+                        expect(keyEvent.preventDefault.callCount).toBe(1);
+                        expect(areaCapture.isActive).toBeFalsy();
+                        
+                        afterEach();
+                    });
+
+                    it('should ignore non-ESC keys', () => {
+                        beforeEach();
+                        
+                        const onCancel = createMock();
+                        areaCapture.start(createMock(), onCancel);
+                        
+                        const keyEvent = createKeyboardEvent('keydown', { key: 'Enter' });
+                        areaCapture.handleKeyDown(keyEvent);
+                        
+                        expect(onCancel.callCount).toBe(0);
+                        expect(areaCapture.isActive).toBeTruthy();
+                        
+                        afterEach();
+                    });
+
+                    it('should stop capture and cleanup properly', () => {
+                        beforeEach();
+                        
+                        areaCapture.start(createMock(), createMock());
+                        expect(areaCapture.isActive).toBeTruthy();
+                        
+                        areaCapture.stop();
+                        
+                        const state = areaCapture.getState();
+                        expect(state.isActive).toBeFalsy();
+                        expect(state.isDrawing).toBeFalsy();
+                        expect(state.hasOverlay).toBeFalsy();
+                        expect(areaCapture.onCompleteCallback).toBeNull();
+                        expect(areaCapture.onCancelCallback).toBeNull();
+                        
+                        afterEach();
+                    });
+
+                    it('should handle stop when not active', () => {
+                        beforeEach();
+                        
+                        // Should not throw error
+                        areaCapture.stop();
+                        expect(areaCapture.isActive).toBeFalsy();
+                        
+                        afterEach();
+                    });
+
+                    it('should create overlay with correct structure', () => {
+                        beforeEach();
+                        
+                        areaCapture.start(createMock(), createMock());
+                        
+                        // Check that elements were created
+                        expect(mockDocument.createElement.callCount).toBe(3);
+                        expect(mockDocument.body.appendChild.callCount).toBe(1);
+                        
+                        afterEach();
                     });
                 });
             }
