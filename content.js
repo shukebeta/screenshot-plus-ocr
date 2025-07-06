@@ -2,7 +2,7 @@
 // Prevent double-loading
 if (!window.screenshotOCRLoaded) {
     window.screenshotOCRLoaded = true;
-    console.log('Screenshot OCR content script loaded');
+    console.log('Screenshot Plus OCR content script loaded');
 
     // Check if modules are already loaded from previous injection
     if (!window.AreaCapture || !window.ImageCropper) {

@@ -1,4 +1,4 @@
-# Screenshot OCR Chrome Extension
+# Screenshot Plus OCR Chrome Extension
 
 A Chrome extension that captures screenshot areas and extracts text using AI OCR via OpenRouter API.
 

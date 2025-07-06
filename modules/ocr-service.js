@@ -85,7 +85,7 @@ class OCRService {
                     'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json',
                     'HTTP-Referer': 'https://github.com/screenshot-ocr-extension',
-                    'X-Title': 'Screenshot OCR Extension'
+                    'X-Title': 'Screenshot Plus OCR Extension'
                 },
                 body: JSON.stringify(requestBody),
                 signal: controller.signal

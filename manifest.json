@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Screenshot OCR",
+  "name": "Screenshot Plus OCR",
   "version": "1.0.0",
   "description": "Capture screenshots and extract text using AI OCR",
   "permissions": [

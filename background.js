@@ -62,5 +62,5 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
 
 // Handle extension installation
 chrome.runtime.onInstalled.addListener(function() {
-    console.log('Screenshot OCR extension installed');
+    console.log('Screenshot Plus OCR extension installed');
 });
