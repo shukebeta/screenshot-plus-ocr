@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Screenshot OCR Extension - Unit Tests</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .test-controls {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .test-output {
+            background: #1e1e1e;
+            color: #f8f8f2;
+            padding: 20px;
+            border-radius: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.4;
+            min-height: 400px;
+            overflow-y: auto;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+            font-size: 14px;
+        }
+        .button:hover {
+            background-color: #45a049;
+        }
+        .test-summary {
+            background: white;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            border-left: 4px solid #4CAF50;
+        }
+        .test-summary.failed {
+            border-left-color: #f44336;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🧪 Screenshot OCR Extension - Unit Tests</h1>
+        <p>Simple test runner with immediate execution</p>
+    </div>
+
+    <div class="test-controls">
+        <button id="runTests" class="button">Run All Tests</button>
+        <button id="clearOutput" class="button">Clear Output</button>
+    </div>
+
+    <div id="testSummary" class="test-summary" style="display: none;">
+        <div id="summaryContent"></div>
+    </div>
+
+    <div class="test-output" id="testOutput">
+        Click "Run All Tests" to start testing...
+    </div>
+
+    <!-- Load modules first -->
+    <script src="../modules/storage-manager.js"></script>
+    <script src="../modules/clipboard-manager.js"></script>
+    <script src="../modules/ocr-service.js"></script>
+    <script src="../modules/screenshot-capture.js"></script>
+    <script src="../modules/ui-manager.js"></script>
+
+    <script>
+        // Simple test framework
+        class SimpleTestFramework {
+            constructor() {
+                this.results = { passed: 0, failed: 0, total: 0 };
+                this.output = [];
+            }
+
+            reset() {
+                this.results = { passed: 0, failed: 0, total: 0 };
+                this.output = [];
+            }
+
+            log(message, type = 'log') {
+                this.output.push({ message, type });
+                console.log(message);
+            }
+
+            describe(name, fn) {
+                this.log(`\n🧪 Test Suite: ${name}`, 'group');
+                fn();
+            }
+
+            it(description, fn) {
+                try {
+                    fn();
+                    this.results.passed++;
+                    this.log(`✅ ${description}`);
+                } catch (error) {
+                    this.results.failed++;
+                    this.log(`❌ ${description}`);
+                    this.log(`   Error: ${error.message}`, 'error');
+                }
+                this.results.total++;
+            }
+
+            async itAsync(description, fn) {
+                try {
+                    await fn();
+                    this.results.passed++;
+                    this.log(`✅ ${description}`);
+                } catch (error) {
+                    this.results.failed++;
+                    this.log(`❌ ${description}`);
+                    this.log(`   Error: ${error.message}`, 'error');
+                }
+                this.results.total++;
+            }
+
+            expect(actual) {
+                return {
+                    toBe: (expected) => {
+                        if (actual !== expected) {
+                            throw new Error(`Expected ${expected}, but got ${actual}`);
+                        }
+                    },
+                    toEqual: (expected) => {
+                        if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+                            throw new Error(`Expected ${JSON.stringify(expected)}, but got ${JSON.stringify(actual)}`);
+                        }
+                    },
+                    toBeTruthy: () => {
+                        if (!actual) {
+                            throw new Error(`Expected truthy value, but got ${actual}`);
+                        }
+                    },
+                    toBeFalsy: () => {
+                        if (actual) {
+                            throw new Error(`Expected falsy value, but got ${actual}`);
+                        }
+                    },
+                    toThrow: () => {
+                        if (typeof actual !== 'function') {
+                            throw new Error('Expected a function for toThrow assertion');
+                        }
+                        try {
+                            actual();
+                            throw new Error('Expected function to throw, but it didn\'t');
+                        } catch (e) {
+                            // Function threw as expected
+                        }
+                    },
+                    toContain: (expected) => {
+                        if (!actual.includes(expected)) {
+                            throw new Error(`Expected ${actual} to contain ${expected}`);
+                        }
+                    },
+                    toBeInstanceOf: (constructor) => {
+                        if (!(actual instanceof constructor)) {
+                            throw new Error(`Expected instance of ${constructor.name}, but got ${typeof actual}`);
+                        }
+                    },
+                    toBeNull: () => {
+                        if (actual !== null) {
+                            throw new Error(`Expected null, but got ${actual}`);
+                        }
+                    },
+                    toBeUndefined: () => {
+                        if (actual !== undefined) {
+                            throw new Error(`Expected undefined, but got ${actual}`);
+                        }
+                    },
+                    toHaveProperty: (property) => {
+                        if (!(property in actual)) {
+                            throw new Error(`Expected object to have property ${property}`);
+                        }
+                    }
+                };
+            }
+
+            createMock(implementation = () => {}) {
+                const mock = function(...args) {
+                    mock.calls.push(args);
+                    mock.callCount++;
+                    return implementation.apply(this, args);
+                };
+                
+                mock.calls = [];
+                mock.callCount = 0;
+                mock.mockReturnValue = (value) => {
+                    implementation = () => value;
+                    return mock;
+                };
+                mock.mockResolvedValue = (value) => {
+                    implementation = () => Promise.resolve(value);
+                    return mock;
+                };
+                mock.mockRejectedValue = (error) => {
+                    implementation = () => Promise.reject(error);
+                    return mock;
+                };
+                mock.mockImplementation = (fn) => {
+                    implementation = fn;
+                    return mock;
+                };
+                
+                return mock;
+            }
+
+            printResults() {
+                this.log('\n📊 Test Results Summary:');
+                this.log(`Total tests: ${this.results.total}`);
+                this.log(`✅ Passed: ${this.results.passed}`);
+                this.log(`❌ Failed: ${this.results.failed}`);
+                
+                if (this.results.failed === 0) {
+                    this.log('🎉 All tests passed!');
+                } else {
+                    this.log(`⚠️  ${this.results.failed} test(s) failed`);
+                }
+                
+                return this.results.failed === 0;
+            }
+        }
+
+        // Global test framework instance
+        const testFramework = new SimpleTestFramework();
+        
+        // Export globally
+        window.describe = (name, fn) => testFramework.describe(name, fn);
+        window.it = (description, fn) => testFramework.it(description, fn);
+        window.itAsync = (description, fn) => testFramework.itAsync(description, fn);
+        window.expect = (actual) => testFramework.expect(actual);
+        window.createMock = (impl) => testFramework.createMock(impl);
+
+        // Test runner
+        class TestRunner {
+            constructor() {
+                this.outputElement = document.getElementById('testOutput');
+                this.summaryElement = document.getElementById('testSummary');
+                this.summaryContent = document.getElementById('summaryContent');
+                this.setupEventListeners();
+            }
+
+            setupEventListeners() {
+                document.getElementById('runTests').addEventListener('click', () => this.runAllTests());
+                document.getElementById('clearOutput').addEventListener('click', () => this.clearOutput());
+            }
+
+            async runAllTests() {
+                this.clearOutput();
+                testFramework.reset();
+                
+                this.addOutput('🚀 Starting test execution...\n', 'info');
+                
+                try {
+                    // Run basic tests to verify framework
+                    this.runBasicTests();
+                    
+                    // Run module tests
+                    await this.runModuleTests();
+                    
+                    const allPassed = testFramework.printResults();
+                    this.showSummary(testFramework.results, allPassed);
+                    
+                } catch (error) {
+                    this.addOutput(`Test execution failed: ${error.message}`, 'error');
+                }
+            }
+
+            runBasicTests() {
+                describe('Basic Framework Tests', () => {
+                    it('should have modules loaded', () => {
+                        expect(typeof ClipboardManager).toBe('function');
+                        expect(typeof OCRService).toBe('function');
+                        expect(typeof StorageManager).toBe('function');
+                        expect(typeof UIManager).toBe('function');
+                        expect(typeof ScreenshotCapture).toBe('function');
+                    });
+
+                    it('should create module instances', () => {
+                        const clipboard = new ClipboardManager();
+                        const ocr = new OCRService();
+                        const storage = new StorageManager();
+                        const ui = new UIManager();
+                        const screenshot = new ScreenshotCapture();
+                        
+                        expect(clipboard).toBeInstanceOf(ClipboardManager);
+                        expect(ocr).toBeInstanceOf(OCRService);
+                        expect(storage).toBeInstanceOf(StorageManager);
+                        expect(ui).toBeInstanceOf(UIManager);
+                        expect(screenshot).toBeInstanceOf(ScreenshotCapture);
+                    });
+                });
+            }
+
+            async runModuleTests() {
+                // ClipboardManager tests
+                describe('ClipboardManager', () => {
+                    it('should initialize with correct properties', () => {
+                        const manager = new ClipboardManager();
+                        expect(manager).toHaveProperty('isSupported');
+                    });
+
+                    it('should convert data URL to blob', () => {
+                        const manager = new ClipboardManager();
+                        const testDataURL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+                        const blob = manager.dataURLToBlob(testDataURL);
+                        expect(blob).toBeInstanceOf(Blob);
+                        expect(blob.type).toBe('image/png');
+                    });
+                });
+
+                // OCRService tests
+                describe('OCRService', () => {
+                    it('should initialize with default values', () => {
+                        const service = new OCRService();
+                        expect(service.baseURL).toBe('https://openrouter.ai/api/v1/chat/completions');
+                        expect(service.defaultModel).toBe('openai/gpt-4o');
+                        expect(service.maxTokens).toBe(4000);
+                    });
+
+                    it('should validate supported models', () => {
+                        const service = new OCRService();
+                        expect(service.isValidModel('openai/gpt-4o')).toBeTruthy();
+                        expect(service.isValidModel('invalid/model')).toBeFalsy();
+                    });
+
+                    it('should return supported models list', () => {
+                        const service = new OCRService();
+                        const models = service.getSupportedModels();
+                        expect(models).toBeInstanceOf(Array);
+                        expect(models.length).toBe(6);
+                    });
+                });
+
+                // StorageManager tests
+                describe('StorageManager', () => {
+                    it('should initialize with correct properties', () => {
+                        const manager = new StorageManager();
+                        expect(manager.syncKeys).toEqual(['apiKey', 'selectedModel']);
+                        expect(manager.localKeys).toEqual(['latestScreenshot', 'screenshotTimestamp']);
+                        expect(manager.screenshotExpiryTime).toBe(5 * 60 * 1000);
+                    });
+                });
+
+                // UIManager tests
+                describe('UIManager', () => {
+                    it('should initialize with default state', () => {
+                        const manager = new UIManager();
+                        expect(manager.elements).toEqual({});
+                        expect(manager.state).toEqual({
+                            isCapturing: false,
+                            hasScreenshot: false,
+                            isProcessing: false
+                        });
+                        expect(manager.callbacks).toEqual({});
+                    });
+
+                    it('should handle event registration', () => {
+                        const manager = new UIManager();
+                        const callback = createMock();
+                        manager.on('testEvent', callback);
+                        manager.emit('testEvent', 'testData');
+                        expect(callback.callCount).toBe(1);
+                        expect(callback.calls[0][0]).toBe('testData');
+                    });
+                });
+
+                // ScreenshotCapture tests
+                describe('ScreenshotCapture', () => {
+                    it('should initialize with default state', () => {
+                        const capture = new ScreenshotCapture();
+                        expect(capture.isCapturing).toBeFalsy();
+                        expect(capture.currentCallback).toBeNull();
+                    });
+                });
+            }
+
+            addOutput(message, type = 'log') {
+                const div = document.createElement('div');
+                div.style.color = type === 'error' ? '#ff5555' : 
+                                 type === 'info' ? '#8be9fd' : '#f8f8f2';
+                div.textContent = message;
+                this.outputElement.appendChild(div);
+                this.outputElement.scrollTop = this.outputElement.scrollHeight;
+            }
+
+            showSummary(results, allPassed) {
+                this.summaryElement.style.display = 'block';
+                this.summaryElement.className = allPassed ? 'test-summary' : 'test-summary failed';
+                
+                const passRate = results.total > 0 ? ((results.passed / results.total) * 100).toFixed(1) : 0;
+                
+                this.summaryContent.innerHTML = `
+                    <strong>Total:</strong> ${results.total} | 
+                    <strong style="color: #4CAF50;">Passed:</strong> ${results.passed} | 
+                    <strong style="color: #f44336;">Failed:</strong> ${results.failed} | 
+                    <strong>Pass Rate:</strong> ${passRate}% 
+                    ${allPassed ? '✅' : '❌'}
+                `;
+            }
+
+            clearOutput() {
+                this.outputElement.innerHTML = '';
+                this.summaryElement.style.display = 'none';
+            }
+        }
+
+        // Initialize when DOM is ready
+        document.addEventListener('DOMContentLoaded', () => {
+            // Redirect console to output
+            const originalConsole = console.log;
+            console.log = function(...args) {
+                originalConsole.apply(console, args);
+                const outputElement = document.getElementById('testOutput');
+                if (outputElement) {
+                    const div = document.createElement('div');
+                    div.style.color = '#f8f8f2';
+                    div.textContent = args.join(' ');
+                    outputElement.appendChild(div);
+                    outputElement.scrollTop = outputElement.scrollHeight;
+                }
+            };
+
+            new TestRunner();
+        });
+    </script>
+</body>
+</html>
