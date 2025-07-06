@@ -22,6 +22,9 @@ class ScreenshotOCRPopup {
             // Setup module event handlers
             this.setupModuleHandlers();
             
+            // Setup storage listener for area capture completion
+            this.setupStorageListener();
+            
             // Load saved settings and check for screenshots
             await this.loadInitialState();
             
@@ -31,6 +34,7 @@ class ScreenshotOCRPopup {
             this.modules.ui?.showError('Failed to initialize extension');
         }
     }
+
 
     /**
      * Initialize all modules
@@ -76,6 +80,22 @@ class ScreenshotOCRPopup {
     }
 
     /**
+     * Setup storage listener for area capture completion
+     */
+    setupStorageListener() {
+        chrome.storage.onChanged.addListener((changes, namespace) => {
+            if (namespace === 'local' && changes.latestScreenshot) {
+                console.log('ScreenshotOCRPopup: Storage changed - screenshot detected');
+                const imageData = changes.latestScreenshot.newValue;
+                if (imageData && this.modules.screenshot.isCapturing) {
+                    console.log('ScreenshotOCRPopup: Notifying ScreenshotCapture module');
+                    this.modules.screenshot.handleAreaCaptureComplete(imageData);
+                }
+            }
+        });
+    }
+
+    /**
      * Load initial state from storage
      */
     async loadInitialState() {
@@ -95,6 +115,15 @@ class ScreenshotOCRPopup {
                 this.currentScreenshot = screenshot.imageData;
                 this.modules.ui.setScreenshotAvailable(true);
                 console.log('ScreenshotOCRPopup: Found recent screenshot');
+                
+                // Check if this is a very recent screenshot (within last 15 seconds)
+                // This is just a friendly UX reminder - OCR works regardless of timing
+                const screenshotTime = await chrome.storage.local.get('screenshotTimestamp');
+                const now = Date.now();
+                if (screenshotTime.screenshotTimestamp && (now - screenshotTime.screenshotTimestamp) < 15000) {
+                    // Show friendly reminder that fresh screenshot is ready
+                    this.modules.ui.showSuccess('✅ Area screenshot ready! You can now extract text using OCR.');
+                }
             }
         } catch (error) {
             console.error('ScreenshotOCRPopup: Failed to load initial state:', error);
@@ -108,15 +137,31 @@ class ScreenshotOCRPopup {
         try {
             console.log('ScreenshotOCRPopup: Starting area capture');
             
-            // Start area capture and close popup
+            // Show instructional message
+            this.modules.ui.showMessage('📝 This popup will close when you click the webpage - that\'s normal! Click and drag to select an area...');
+            this.modules.ui.setButtonState('capture-area', 'loading');
+            
+            // Start area capture
             const imageData = await this.modules.screenshot.captureArea();
-            window.close(); // Close popup so overlay is visible
+            
+            // Area capture completed - update UI
+            if (imageData) {
+                this.currentScreenshot = imageData;
+                this.modules.ui.setScreenshotAvailable(true);
+                this.modules.ui.showSuccess('✅ Area screenshot captured! You can now extract text using OCR.');
+                this.modules.ui.setButtonState('capture-area', 'normal');
+            } else {
+                this.modules.ui.showError('❌ No image data received from area capture');
+                this.modules.ui.setButtonState('capture-area', 'normal');
+            }
             
         } catch (error) {
             console.error('ScreenshotOCRPopup: Area capture failed:', error);
-            this.modules.ui.showError(error.message);
+            this.modules.ui.showError(`❌ Area capture failed: ${error.message}`);
+            this.modules.ui.setButtonState('capture-area', 'normal');
         }
     }
+
 
     /**
      * Handle full page capture request

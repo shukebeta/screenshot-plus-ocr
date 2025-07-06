@@ -55,35 +55,44 @@ class UIManager {
         // Area capture button
         if (this.elements.captureBtn) {
             this.elements.captureBtn.addEventListener('click', () => {
-                this.handleAreaCapture();
+                console.log('UIManager: Area capture button clicked');
+                this.emit('areaCapture');
             });
         }
 
         // Full page capture button
         if (this.elements.captureFullBtn) {
             this.elements.captureFullBtn.addEventListener('click', () => {
-                this.handleFullPageCapture();
+                console.log('UIManager: Full page capture button clicked');
+                this.emit('fullPageCapture');
             });
         }
+
 
         // OCR button
         if (this.elements.ocrBtn) {
             this.elements.ocrBtn.addEventListener('click', () => {
-                this.handleOCR();
+                console.log('UIManager: OCR button clicked');
+                this.emit('ocr', {
+                    apiKey: this.getAPIKey(),
+                    model: this.getSelectedModel()
+                });
             });
         }
 
         // API key change
         if (this.elements.apiKeyInput) {
             this.elements.apiKeyInput.addEventListener('change', () => {
-                this.handleAPIKeyChange();
+                console.log('UIManager: API key changed');
+                this.emit('apiKeyChange', this.getAPIKey());
             });
         }
 
         // Model selection change
         if (this.elements.modelSelect) {
             this.elements.modelSelect.addEventListener('change', () => {
-                this.handleModelChange();
+                console.log('UIManager: Model changed');
+                this.emit('modelChange', this.getSelectedModel());
             });
         }
     }
@@ -241,7 +250,7 @@ class UIManager {
      */
     showError(message) {
         console.error('UIManager: Error:', message);
-        alert(message); // Simple alert for now, could be improved
+        this.showInResultDiv(message, 'error');
         this.setState({isProcessing: false, isCapturing: false});
     }
 
@@ -251,8 +260,90 @@ class UIManager {
      */
     showSuccess(message) {
         console.log('UIManager: Success:', message);
-        alert(message); // Simple alert for now, could be improved
+        this.showInResultDiv(message, 'success');
         this.setState({isCapturing: false});
+    }
+
+    /**
+     * Show info message
+     * @param {string} message - Info message
+     */
+    showMessage(message) {
+        console.log('UIManager: Info:', message);
+        this.showInResultDiv(message, 'info');
+    }
+
+    /**
+     * Show message in result div
+     * @param {string} message - Message to show
+     * @param {string} type - Message type (error, success, info)
+     */
+    showInResultDiv(message, type = 'info') {
+        if (!this.elements.result || !this.elements.resultText) return;
+        
+        // Set text and style based on type
+        this.elements.resultText.textContent = message;
+        this.elements.result.className = type === 'error' ? 'error' : 
+                                        type === 'success' ? 'success' : '';
+        
+        // Show the result div
+        this.elements.result.classList.remove('hidden');
+        
+        // Auto-hide info messages after 5 seconds
+        if (type === 'info') {
+            setTimeout(() => {
+                if (this.elements.resultText.textContent === message) {
+                    this.elements.result.classList.add('hidden');
+                }
+            }, 5000);
+        }
+    }
+
+    /**
+     * Set button state (loading, normal, disabled)
+     * @param {string} buttonId - Button identifier (capture-area, capture-full, ocr)
+     * @param {string} state - State to set (loading, normal, disabled)
+     */
+    setButtonState(buttonId, state) {
+        let button;
+        switch (buttonId) {
+            case 'capture-area':
+                button = this.elements.captureBtn;
+                break;
+            case 'capture-full':
+                button = this.elements.captureFullBtn;
+                break;
+            case 'ocr':
+                button = this.elements.ocrBtn;
+                break;
+            default:
+                console.warn('UIManager: Unknown button ID:', buttonId);
+                return;
+        }
+
+        if (!button) return;
+
+        switch (state) {
+            case 'loading':
+                button.disabled = true;
+                button.textContent = button.textContent.replace(/^.*?(?=\s*\()/, 'Loading...');
+                break;
+            case 'disabled':
+                button.disabled = true;
+                break;
+            case 'normal':
+            default:
+                button.disabled = false;
+                // Restore original text
+                if (buttonId === 'capture-area') {
+                    button.textContent = 'Capture Screenshot (Area Select)';
+                } else if (buttonId === 'capture-full') {
+                    button.textContent = 'Capture Full Page';
+                } else if (buttonId === 'ocr') {
+                    button.textContent = 'Extract Text (OCR)';
+                }
+                break;
+        }
     }
 
     /**

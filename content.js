@@ -22,6 +22,8 @@ if (!window.screenshotOCRLoaded) {
                 this.onCompleteCallback = null;
                 this.onCancelCallback = null;
                 this.doc = documentRef || document;
+                this.originalScrollPosition = null;
+                this.preventScroll = null;
                 
                 this.handleMouseDown = this.handleMouseDown.bind(this);
                 this.handleMouseMove = this.handleMouseMove.bind(this);
@@ -78,7 +80,19 @@ if (!window.screenshotOCRLoaded) {
                 this.overlay.appendChild(this.selectionBox);
                 this.overlay.appendChild(instructions);
                 this.doc.body.appendChild(this.overlay);
-                this.doc.body.style.overflow = 'hidden';
+                
+                // Prevent scrolling without changing overflow (which causes scroll to top)
+                this.originalScrollPosition = {
+                    x: window.scrollX || window.pageXOffset,
+                    y: window.scrollY || window.pageYOffset
+                };
+                this.preventScroll = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                };
+                // Prevent scroll events but don't change overflow
+                document.addEventListener('wheel', this.preventScroll, { passive: false });
+                document.addEventListener('touchmove', this.preventScroll, { passive: false });
             }
 
             removeOverlay() {
@@ -87,7 +101,19 @@ if (!window.screenshotOCRLoaded) {
                     this.overlay = null;
                 }
                 this.selectionBox = null;
-                this.doc.body.style.overflow = '';
+                
+                // Remove scroll prevention and restore original position
+                if (this.preventScroll) {
+                    document.removeEventListener('wheel', this.preventScroll);
+                    document.removeEventListener('touchmove', this.preventScroll);
+                    this.preventScroll = null;
+                }
+                
+                // Restore original scroll position if it was saved
+                if (this.originalScrollPosition) {
+                    window.scrollTo(this.originalScrollPosition.x, this.originalScrollPosition.y);
+                    this.originalScrollPosition = null;
+                }
             }
 
             attachEventListeners() {
@@ -95,8 +121,8 @@ if (!window.screenshotOCRLoaded) {
                 this.doc.addEventListener('mousemove', this.handleMouseMove);
                 this.doc.addEventListener('mouseup', this.handleMouseUp);
                 this.doc.addEventListener('keydown', this.handleKeyDown);
+                // Don't focus the overlay to avoid scrolling issues
                 this.overlay.setAttribute('tabindex', '0');
-                this.overlay.focus();
             }
 
             detachEventListeners() {
@@ -343,9 +369,9 @@ if (!window.screenshotOCRLoaded) {
                 if (response.success) {
                     // Copy to clipboard and store
                     await this.processScreenshot(response.imageData);
-                    this.showNotification('Screenshot captured and copied to clipboard!');
+                    this.showNotification('✅ Screenshot captured and copied to clipboard! Click the extension icon to extract text with OCR.', 'success', 8000);
                 } else {
-                    this.showNotification('Failed to capture screenshot: ' + response.error);
+                    this.showNotification('Failed to capture screenshot: ' + response.error, 'error');
                 }
             } catch (error) {
                 console.error('Screenshot processing failed:', error);
@@ -354,6 +380,7 @@ if (!window.screenshotOCRLoaded) {
 
             this.cleanup();
         }
+
 
         /**
          * Handle area selection cancellation
@@ -459,9 +486,11 @@ if (!window.screenshotOCRLoaded) {
         /**
          * Show notification to user
          */
-        showNotification(message, type = 'success') {
+        showNotification(message, type = 'success', duration = 3000) {
             const notification = document.createElement('div');
-            const backgroundColor = type === 'success' ? '#4CAF50' : '#f44336';
+            const backgroundColor = type === 'success' ? '#4CAF50' : 
+                                  type === 'error' ? '#f44336' : 
+                                  '#2196F3'; // info/default
             
             notification.style.cssText = `
                 position: fixed;
@@ -476,19 +505,20 @@ if (!window.screenshotOCRLoaded) {
                 font-size: 14px;
                 font-weight: 500;
                 box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-                max-width: 300px;
+                max-width: 320px;
                 word-wrap: break-word;
+                line-height: 1.4;
             `;
             notification.textContent = message;
             
             document.body.appendChild(notification);
             
-            // Auto-remove after 3 seconds
+            // Auto-remove after specified duration
             setTimeout(() => {
                 if (notification.parentNode) {
                     notification.remove();
                 }
-            }, 3000);
+            }, duration);
         }
 
         /**
@@ -509,6 +539,12 @@ if (!window.screenshotOCRLoaded) {
          */
         handleMessage(request, sender, sendResponse) {
             console.log('Content script received message:', request);
+            
+            if (request.action === 'test') {
+                console.log('Content script: Test message received');
+                sendResponse({ success: true, message: 'Content script is working' });
+                return false;
+            }
             
             if (request.action === 'startCapture') {
                 try {
