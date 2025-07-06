@@ -19,7 +19,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["*.png", "*.jpg", "*.jpeg"],
+      "resources": ["*.png", "*.jpg", "*.jpeg", "content-modules/*.js"],
       "matches": ["<all_urls>"]
     }
   ]

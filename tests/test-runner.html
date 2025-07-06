@@ -92,6 +92,7 @@
     
     <!-- Load content script modules -->
     <script src="../content-modules/area-capture.js"></script>
+    <script src="../content-modules/image-cropper.js"></script>
 
     <script>
         // Simple test framework
@@ -429,6 +430,7 @@
                         expect(typeof UIManager).toBe('function');
                         expect(typeof ScreenshotCapture).toBe('function');
                         expect(typeof AreaCapture).toBe('function');
+                        expect(typeof ImageCropper).toBe('function');
                     });
 
                     it('should create module instances', () => {
@@ -438,6 +440,7 @@
                         const ui = new UIManager();
                         const screenshot = new ScreenshotCapture();
                         const areaCapture = new AreaCapture(testFramework.mockDocument());
+                        const imageCropper = new ImageCropper(testFramework.mockDocument(), testFramework.mockWindow());
                         
                         expect(clipboard).toBeInstanceOf(ClipboardManager);
                         expect(ocr).toBeInstanceOf(OCRService);
@@ -445,6 +448,7 @@
                         expect(ui).toBeInstanceOf(UIManager);
                         expect(screenshot).toBeInstanceOf(ScreenshotCapture);
                         expect(areaCapture).toBeInstanceOf(AreaCapture);
+                        expect(imageCropper).toBeInstanceOf(ImageCropper);
                     });
                 });
             }
@@ -524,10 +528,318 @@
 
                 // ScreenshotCapture tests
                 describe('ScreenshotCapture', () => {
+                    let capture;
+                    let mockChrome;
+                    let originalChrome;
+
+                    const beforeEach = () => {
+                        capture = new ScreenshotCapture();
+                        
+                        // Mock Chrome APIs
+                        mockChrome = {
+                            runtime: {
+                                sendMessage: createMock(),
+                                lastError: null,
+                                onMessage: {
+                                    addListener: createMock()
+                                }
+                            },
+                            tabs: {
+                                query: createMock(),
+                                sendMessage: createMock(),
+                                captureVisibleTab: createMock()
+                            },
+                            scripting: {
+                                executeScript: createMock()
+                            }
+                        };
+                        
+                        originalChrome = window.chrome;
+                        window.chrome = mockChrome;
+                    };
+
+                    const afterEach = () => {
+                        if (originalChrome) {
+                            window.chrome = originalChrome;
+                        } else {
+                            delete window.chrome;
+                        }
+                        
+                        if (capture.isCapturing) {
+                            capture.cancelCapture();
+                        }
+                    };
+
                     it('should initialize with default state', () => {
-                        const capture = new ScreenshotCapture();
+                        beforeEach();
+                        
                         expect(capture.isCapturing).toBeFalsy();
                         expect(capture.currentCallback).toBeNull();
+                        
+                        afterEach();
+                    });
+
+                    it('should handle full page capture successfully', async () => {
+                        beforeEach();
+                        
+                        // Mock successful response
+                        mockChrome.runtime.sendMessage.implementation = (message, callback) => {
+                            setTimeout(() => {
+                                callback({ imageData: 'data:image/png;base64,test' });
+                            }, 0);
+                        };
+                        
+                        const result = await capture.captureFullPage();
+                        expect(result).toBe('data:image/png;base64,test');
+                        expect(mockChrome.runtime.sendMessage.callCount).toBe(1);
+                        
+                        afterEach();
+                    });
+
+                    it('should handle full page capture errors', async () => {
+                        beforeEach();
+                        
+                        // Mock error response
+                        mockChrome.runtime.sendMessage.implementation = (message, callback) => {
+                            setTimeout(() => {
+                                callback({ error: 'Capture failed' });
+                            }, 0);
+                        };
+                        
+                        let error;
+                        try {
+                            await capture.captureFullPage();
+                        } catch (e) {
+                            error = e;
+                        }
+                        
+                        expect(error).toBeDefined();
+                        expect(error.message).toBe('Capture failed');
+                        
+                        afterEach();
+                    });
+
+                    it('should handle runtime errors in full page capture', async () => {
+                        beforeEach();
+                        
+                        // Mock runtime error
+                        mockChrome.runtime.sendMessage.implementation = (message, callback) => {
+                            mockChrome.runtime.lastError = { message: 'Runtime error' };
+                            setTimeout(() => callback(), 0);
+                        };
+                        
+                        let error;
+                        try {
+                            await capture.captureFullPage();
+                        } catch (e) {
+                            error = e;
+                        }
+                        
+                        expect(error).toBeDefined();
+                        expect(error.message).toBe('Runtime error');
+                        
+                        afterEach();
+                    });
+
+                    it('should start area capture successfully', async () => {
+                        beforeEach();
+                        
+                        // Mock successful tab query and script injection
+                        mockChrome.tabs.query.implementation = (query, callback) => {
+                            setTimeout(() => {
+                                callback([{ id: 1, url: 'https://example.com' }]);
+                            }, 0);
+                        };
+                        
+                        mockChrome.scripting.executeScript.implementation = (options, callback) => {
+                            setTimeout(() => callback(), 0);
+                        };
+                        
+                        mockChrome.tabs.sendMessage.implementation = (tabId, message, callback) => {
+                            setTimeout(() => {
+                                callback({ success: true });
+                            }, 0);
+                        };
+                        
+                        const capturePromise = capture.captureArea();
+                        
+                        // Should be in capturing state
+                        expect(capture.isCapturing).toBeTruthy();
+                        expect(capture.currentCallback).toBeDefined();
+                        
+                        // Wait for area capture to start
+                        await new Promise(resolve => setTimeout(resolve, 10));
+                        
+                        expect(mockChrome.tabs.query.callCount).toBe(1);
+                        expect(mockChrome.scripting.executeScript.callCount).toBe(1);
+                        expect(mockChrome.tabs.sendMessage.callCount).toBe(1);
+                        
+                        afterEach();
+                    });
+
+                    it('should reject area capture when already capturing', async () => {
+                        beforeEach();
+                        
+                        capture.isCapturing = true;
+                        
+                        let error;
+                        try {
+                            await capture.captureArea();
+                        } catch (e) {
+                            error = e;
+                        }
+                        
+                        expect(error).toBeDefined();
+                        expect(error.message).toBe('Already capturing');
+                        
+                        afterEach();
+                    });
+
+                    it('should handle no active tab error', async () => {
+                        beforeEach();
+                        
+                        // Mock empty tab query
+                        mockChrome.tabs.query.implementation = (query, callback) => {
+                            setTimeout(() => {
+                                callback([]);
+                            }, 0);
+                        };
+                        
+                        let error;
+                        try {
+                            await capture.captureArea();
+                        } catch (e) {
+                            error = e;
+                        }
+                        
+                        expect(error).toBeDefined();
+                        expect(error.message).toBe('No active tab');
+                        
+                        afterEach();
+                    });
+
+                    it('should handle content script communication error', async () => {
+                        beforeEach();
+                        
+                        // Mock successful tab query and script injection
+                        mockChrome.tabs.query.implementation = (query, callback) => {
+                            setTimeout(() => {
+                                callback([{ id: 1, url: 'https://example.com' }]);
+                            }, 0);
+                        };
+                        
+                        mockChrome.scripting.executeScript.implementation = (options, callback) => {
+                            setTimeout(() => callback(), 0);
+                        };
+                        
+                        // Mock communication error
+                        mockChrome.tabs.sendMessage.implementation = (tabId, message, callback) => {
+                            mockChrome.runtime.lastError = { message: 'No response' };
+                            setTimeout(() => callback(), 0);
+                        };
+                        
+                        let error;
+                        try {
+                            await capture.captureArea();
+                        } catch (e) {
+                            error = e;
+                        }
+                        
+                        expect(error).toBeDefined();
+                        expect(error.message).toBe('Cannot start area capture on this page. Try refreshing the page.');
+                        
+                        afterEach();
+                    });
+
+                    it('should handle area capture completion', () => {
+                        beforeEach();
+                        
+                        const mockCallback = createMock();
+                        capture.currentCallback = { resolve: mockCallback, reject: createMock() };
+                        capture.isCapturing = true;
+                        
+                        const testImageData = 'data:image/png;base64,test';
+                        capture.handleAreaCaptureComplete(testImageData);
+                        
+                        expect(capture.isCapturing).toBeFalsy();
+                        expect(capture.currentCallback).toBeNull();
+                        expect(mockCallback.callCount).toBe(1);
+                        expect(mockCallback.calls[0][0]).toBe(testImageData);
+                        
+                        afterEach();
+                    });
+
+                    it('should handle area capture error', () => {
+                        beforeEach();
+                        
+                        const mockCallback = createMock();
+                        capture.currentCallback = { resolve: createMock(), reject: mockCallback };
+                        capture.isCapturing = true;
+                        
+                        const testError = new Error('Test error');
+                        capture.handleAreaCaptureError(testError);
+                        
+                        expect(capture.isCapturing).toBeFalsy();
+                        expect(capture.currentCallback).toBeNull();
+                        expect(mockCallback.callCount).toBe(1);
+                        expect(mockCallback.calls[0][0]).toBe(testError);
+                        
+                        afterEach();
+                    });
+
+                    it('should cancel capture operation', () => {
+                        beforeEach();
+                        
+                        const mockCallback = createMock();
+                        capture.currentCallback = { resolve: createMock(), reject: mockCallback };
+                        capture.isCapturing = true;
+                        
+                        capture.cancelCapture();
+                        
+                        expect(capture.isCapturing).toBeFalsy();
+                        expect(capture.currentCallback).toBeNull();
+                        expect(mockCallback.callCount).toBe(1);
+                        expect(mockCallback.calls[0][0].message).toBe('Capture cancelled');
+                        
+                        afterEach();
+                    });
+
+                    it('should handle completion without callback', () => {
+                        beforeEach();
+                        
+                        capture.isCapturing = true;
+                        capture.currentCallback = null;
+                        
+                        // Should not throw error
+                        capture.handleAreaCaptureComplete('test');
+                        expect(capture.isCapturing).toBeFalsy();
+                        
+                        afterEach();
+                    });
+
+                    it('should handle error without callback', () => {
+                        beforeEach();
+                        
+                        capture.isCapturing = true;
+                        capture.currentCallback = null;
+                        
+                        // Should not throw error
+                        capture.handleAreaCaptureError(new Error('Test'));
+                        expect(capture.isCapturing).toBeFalsy();
+                        
+                        afterEach();
+                    });
+
+                    it('should handle cancel when not capturing', () => {
+                        beforeEach();
+                        
+                        capture.isCapturing = false;
+                        
+                        // Should not throw error
+                        capture.cancelCapture();
+                        expect(capture.isCapturing).toBeFalsy();
+                        
+                        afterEach();
                     });
                 });
 
@@ -786,6 +1098,219 @@
                         expect(mockDocument.body.appendChild.callCount).toBe(1);
                         
                         afterEach();
+                    });
+                });
+
+                // ImageCropper tests
+                describe('ImageCropper', () => {
+                    let imageCropper;
+                    let mockDocument;
+                    let mockWindow;
+                    const testImageData = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
+                    // Setup before each test
+                    const beforeEach = () => {
+                        mockDocument = testFramework.mockDocument();
+                        mockWindow = testFramework.mockWindow();
+                        imageCropper = new ImageCropper(mockDocument, mockWindow);
+                    };
+
+                    it('should initialize with injected dependencies', () => {
+                        beforeEach();
+                        
+                        expect(imageCropper.doc).toBe(mockDocument);
+                        expect(imageCropper.win).toBe(mockWindow);
+                    });
+
+                    it('should validate area dimensions correctly', () => {
+                        beforeEach();
+                        
+                        // Valid area
+                        expect(imageCropper.isValidArea({x: 0, y: 0, width: 100, height: 100})).toBeTruthy();
+                        
+                        // Invalid areas
+                        expect(imageCropper.isValidArea({})).toBeFalsy();
+                        expect(imageCropper.isValidArea({x: 0, y: 0})).toBeFalsy(); // missing width/height
+                        expect(imageCropper.isValidArea({x: 0, y: 0, width: -10, height: 100})).toBeFalsy(); // negative width
+                        expect(imageCropper.isValidArea({x: -5, y: 0, width: 100, height: 100})).toBeFalsy(); // negative x
+                        expect(imageCropper.isValidArea({x: 0, y: 0, width: 0, height: 100})).toBeFalsy(); // zero width
+                        expect(imageCropper.isValidArea({x: 'invalid', y: 0, width: 100, height: 100})).toBeFalsy(); // non-number
+                    });
+
+                    itAsync('should load image successfully', async () => {
+                        beforeEach();
+                        
+                        const img = await imageCropper.loadImage(testImageData);
+                        expect(img).toHaveProperty('width');
+                        expect(img).toHaveProperty('height');
+                        expect(img.width).toBe(100); // From mock
+                        expect(img.height).toBe(100); // From mock
+                    });
+
+                    itAsync('should handle image loading failure', async () => {
+                        beforeEach();
+                        
+                        // Mock image to fail loading
+                        mockWindow.Image = createMock(function() {
+                            const img = {
+                                onload: null,
+                                onerror: null,
+                                src: ''
+                            };
+                            setTimeout(() => {
+                                if (img.onerror) img.onerror();
+                            }, 0);
+                            return img;
+                        });
+                        
+                        try {
+                            await imageCropper.loadImage('invalid-data-url');
+                            throw new Error('Expected function to throw');
+                        } catch (error) {
+                            expect(error.message).toBe('Failed to load image');
+                        }
+                    });
+
+                    it('should perform crop operation with canvas', () => {
+                        beforeEach();
+                        
+                        const mockImg = {
+                            width: 200,
+                            height: 200
+                        };
+                        const area = {x: 50, y: 50, width: 100, height: 100};
+                        
+                        const result = imageCropper.performCrop(mockImg, area);
+                        
+                        expect(mockDocument.createElement.callCount).toBe(1);
+                        expect(mockDocument.createElement.calls[0][0]).toBe('canvas');
+                        expect(result).toBe('data:image/png;base64,mockdata'); // From mock canvas
+                    });
+
+                    it('should reject crop area beyond image boundaries', () => {
+                        beforeEach();
+                        
+                        const mockImg = {
+                            width: 100,
+                            height: 100
+                        };
+                        const area = {x: 50, y: 50, width: 100, height: 100}; // Extends beyond 100x100 image
+                        
+                        expect(() => {
+                            imageCropper.performCrop(mockImg, area);
+                        }).toThrow('Crop area extends beyond image boundaries');
+                    });
+
+                    itAsync('should crop image successfully', async () => {
+                        beforeEach();
+                        
+                        const area = {x: 0, y: 0, width: 50, height: 50};
+                        
+                        const result = await imageCropper.cropImage(testImageData, area);
+                        
+                        expect(typeof result).toBe('string');
+                        expect(result).toContain('data:image/png;base64,');
+                    });
+
+                    itAsync('should throw error for missing image data', async () => {
+                        beforeEach();
+                        
+                        try {
+                            await imageCropper.cropImage('', {x: 0, y: 0, width: 100, height: 100});
+                            throw new Error('Expected function to throw');
+                        } catch (error) {
+                            expect(error.message).toBe('Image data URL is required');
+                        }
+                    });
+
+                    itAsync('should throw error for invalid area', async () => {
+                        beforeEach();
+                        
+                        try {
+                            await imageCropper.cropImage(testImageData, null);
+                            throw new Error('Expected function to throw');
+                        } catch (error) {
+                            expect(error.message).toBe('Area object is required');
+                        }
+                    });
+
+                    itAsync('should get image dimensions', async () => {
+                        beforeEach();
+                        
+                        const dimensions = await imageCropper.getImageDimensions(testImageData);
+                        
+                        expect(dimensions).toEqual({width: 100, height: 100});
+                    });
+
+                    itAsync('should validate crop area against image', async () => {
+                        beforeEach();
+                        
+                        // Valid area
+                        const validArea = {x: 10, y: 10, width: 50, height: 50};
+                        const isValid = await imageCropper.validateCropArea(testImageData, validArea);
+                        expect(isValid).toBeTruthy();
+                        
+                        // Invalid area (extends beyond image)
+                        const invalidArea = {x: 50, y: 50, width: 100, height: 100};
+                        const isInvalid = await imageCropper.validateCropArea(testImageData, invalidArea);
+                        expect(isInvalid).toBeFalsy();
+                    });
+
+                    itAsync('should create crop preview', async () => {
+                        beforeEach();
+                        
+                        const area = {x: 25, y: 25, width: 50, height: 50};
+                        
+                        const preview = await imageCropper.createCropPreview(testImageData, area);
+                        
+                        expect(typeof preview).toBe('string');
+                        expect(preview).toContain('data:image/png;base64,');
+                    });
+
+                    itAsync('should perform batch crop', async () => {
+                        beforeEach();
+                        
+                        const areas = [
+                            {x: 0, y: 0, width: 25, height: 25},
+                            {x: 25, y: 25, width: 25, height: 25}
+                        ];
+                        
+                        const results = await imageCropper.batchCrop(testImageData, areas);
+                        
+                        expect(results).toBeInstanceOf(Array);
+                        expect(results.length).toBe(2);
+                        expect(typeof results[0]).toBe('string');
+                        expect(typeof results[1]).toBe('string');
+                    });
+
+                    itAsync('should handle empty areas array in batch crop', async () => {
+                        beforeEach();
+                        
+                        try {
+                            await imageCropper.batchCrop(testImageData, []);
+                            throw new Error('Expected function to throw');
+                        } catch (error) {
+                            expect(error.message).toBe('Areas array is required and must not be empty');
+                        }
+                    });
+
+                    it('should get supported formats', () => {
+                        beforeEach();
+                        
+                        const formats = imageCropper.getSupportedFormats();
+                        
+                        expect(formats).toBeInstanceOf(Array);
+                        expect(formats.length).toBe(3); // png, jpeg, webp
+                        expect(formats).toContain('image/png');
+                    });
+
+                    itAsync('should convert image format', async () => {
+                        beforeEach();
+                        
+                        const converted = await imageCropper.convertFormat(testImageData, 'image/jpeg', 0.8);
+                        
+                        expect(typeof converted).toBe('string');
+                        expect(converted).toContain('data:image/png;base64,'); // Mock always returns PNG
                     });
                 });
             }
