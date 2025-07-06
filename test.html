@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Screenshot OCR Test Page</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .test-text {
+            background-color: #f0f0f0;
+            padding: 20px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .large-text {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+        }
+        .small-text {
+            font-size: 14px;
+            color: #666;
+        }
+        .code-block {
+            background-color: #000;
+            color: #00ff00;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: monospace;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Screenshot OCR Test Page</h1>
+    
+    <div class="test-text">
+        <div class="large-text">This is a test for OCR functionality</div>
+        <div class="small-text">This extension should capture this text and convert it to readable format</div>
+    </div>
+    
+    <div class="test-text">
+        <p>Regular paragraph text with some <strong>bold</strong> and <em>italic</em> formatting.</p>
+        <p>Numbers: 123456789</p>
+        <p>Special characters: @#$%^&*()</p>
+    </div>
+    
+    <div class="code-block">
+        function testFunction() {
+            console.log("Hello World!");
+            return true;
+        }
+    </div>
+    
+    <h2>Instructions</h2>
+    <ol>
+        <li>Click the Screenshot OCR extension icon</li>
+        <li>Enter your OpenRouter API key</li>
+        <li>Click "Capture Screenshot"</li>
+        <li>Select one of the text areas above</li>
+        <li>The text should be copied to clipboard automatically</li>
+        <li>Open the popup again and click "Extract Text (OCR)"</li>
+    </ol>
+</body>
+</html>
